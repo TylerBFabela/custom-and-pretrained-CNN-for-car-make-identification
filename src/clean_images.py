@@ -93,7 +93,18 @@ def load_cache():
     if os.path.exists(CACHE_FILE):
         print(f"Loading cached inference results from {CACHE_FILE}...")
         with open(CACHE_FILE, 'rb') as f:
-            return pickle.load(f)
+            cached_data = pickle.load(f)
+            # Check if cache is from a different mode by checking size
+            cache_size = len(cached_data) if cached_data else 0
+            if SAMPLE_MODE and cache_size > 1500:
+                print("⚠ Cache is from FULL mode but SAMPLE_MODE=True. Clearing cache...")
+                os.remove(CACHE_FILE)
+                return None
+            elif not SAMPLE_MODE and cache_size < 5000:
+                print("⚠ Cache is from SAMPLE mode but SAMPLE_MODE=False. Clearing cache...")
+                os.remove(CACHE_FILE)
+                return None
+            return cached_data
     return None
 
 def save_cache(data_list):
