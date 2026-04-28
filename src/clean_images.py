@@ -9,7 +9,7 @@ import hashlib
 import pickle
 
 # ====== CONFIGURATION ======
-SAMPLE_MODE = True  # Set to True to test on 1000 images first, False to run on all 60000
+SAMPLE_MODE = False  # Set to True to test on 1000 images first, False to run on all 60000
 IMAGES_PER_CAR_MODEL = 2  # Keep 1-2 images per car model (make + model + year)
 CACHE_FILE = "/Users/semv/SJSU/CS171/CNN-for-car-MMCR/inference_cache.pkl"
 IMG_DIR = "/Users/semv/SJSU/CS171/CNN-for-car-MMCR/data/60000ImagesOfCars/"
