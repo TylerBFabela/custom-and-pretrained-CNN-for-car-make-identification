@@ -8,8 +8,10 @@ from collections import defaultdict
 import hashlib
 
 # Load model
+print("Loading Faster R-CNN model...")
 model = models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
 model.eval()
+print("Model loaded and ready.\n")
 
 # Transform
 transform = T.Compose([T.ToTensor()])
@@ -63,9 +65,14 @@ IMG_DIR = "/Users/semv/SJSU/CS171/CNN-for-car-MMCR/data/60000ImagesOfCars/"
 data = []
 hashes = defaultdict(list)
 
-files = [f for f in os.listdir(IMG_DIR) if f.endswith(".jpg")][:2000]
+files = [f for f in os.listdir(IMG_DIR) if f.endswith(".jpg")]
+print(f"Found {len(files)} JPG images in {IMG_DIR}")
+print("Limiting to the first 2000 images for testing. Remove the slice to process the full dataset.\n")
+files = files[:500]
 
-for fname in files:
+for i, fname in enumerate(files, start=1):
+    if i % 10 == 0 or i == len(files):
+        print(f"Processing image {i}/{len(files)}: {fname}")
     path = os.path.join(IMG_DIR, fname)
     parsed = parse_filename(fname)
     if parsed is None:
