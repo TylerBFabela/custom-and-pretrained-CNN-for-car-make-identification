@@ -63,8 +63,7 @@ IMG_DIR = "/Users/semv/SJSU/CS171/CNN-for-car-MMCR/data/60000ImagesOfCars/"
 data = []
 hashes = defaultdict(list)
 
-# Limit to first 100 for testing
-files = [f for f in os.listdir(IMG_DIR) if f.endswith(".jpg")][:100]
+files = [f for f in os.listdir(IMG_DIR) if f.endswith(".jpg")][:2000]
 
 for fname in files:
     path = os.path.join(IMG_DIR, fname)
@@ -99,6 +98,7 @@ for model_key, group in df.groupby('model'):
             to_keep.extend(good_images.head(2)['path'].tolist())
     elif len(good_images) == 1:
         to_keep.append(good_images.iloc[0]['path'])
+        print(f"Only 1 full car for {model_key}, keeping it.")
         # Find another not full but different hash
         others = group[group['is_full'] == False]
         unique_others = others.drop_duplicates('hash')
@@ -114,5 +114,6 @@ all_paths = set(df['path'])
 to_delete = all_paths - set(to_keep)
 for path in to_delete:
     os.remove(path)
+    print(f"Deleted {path}")
 
 print(f"Kept {len(to_keep)} images, deleted {len(to_delete)}")
