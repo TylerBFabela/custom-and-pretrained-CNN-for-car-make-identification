@@ -6,6 +6,14 @@ import torchvision.transforms as T
 import pandas as pd
 from collections import defaultdict
 import hashlib
+import pickle
+
+# ====== CONFIGURATION ======
+SAMPLE_MODE = True  # Set to True to test on 1000 images first, False to run on all 60000
+IMAGES_PER_CAR_MODEL = 2  # Keep 1-2 images per car model (make + model + year)
+CACHE_FILE = "/Users/semv/SJSU/CS171/CNN-for-car-MMCR/inference_cache.pkl"
+IMG_DIR = "/Users/semv/SJSU/CS171/CNN-for-car-MMCR/data/60000ImagesOfCars/"
+# ===========================
 
 # Load model
 print("Loading Faster R-CNN model...")
@@ -21,26 +29,47 @@ def get_image_hash(image_path):
     with open(image_path, 'rb') as f:
         return hashlib.md5(f.read()).hexdigest()
 
-# Function to check if full car
+# Function to check if full car and not interior shot
 def is_full_car(image_path):
     try:
         img = Image.open(image_path).convert("RGB")
         img_tensor = transform(img)
+        img_area = img.size[0] * img.size[1]
+        
         with torch.no_grad():
             predictions = model([img_tensor])
         pred = predictions[0]
+        
         # Find car class, COCO has car as 3
         car_indices = (pred['labels'] == 3) & (pred['scores'] > 0.5)
         if not car_indices.any():
             return False
+        
         # Get the bbox with highest score
         best_idx = pred['scores'][car_indices].argmax()
-        bbox = pred['boxes'][best_idx]
-        # Area of bbox
-        bbox_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-        img_area = img.size[0] * img.size[1]
-        # If bbox area > 0.6 * img_area, consider full car
-        return bbox_area > 0.6 * img_area
+        car_bbox = pred['boxes'][best_idx]
+        bbox_area = (car_bbox[2] - car_bbox[0]) * (car_bbox[3] - car_bbox[1])
+        
+        # Moderate threshold: bbox must cover > 0.5 of image (removes zoomed-in partial views)
+        if bbox_area <= 0.5 * img_area:
+            return False
+        
+        # Check for interior shots: detect people (COCO class 1) inside the car bbox
+        person_indices = (pred['labels'] == 1) & (pred['scores'] > 0.5)
+        if person_indices.any():
+            x1, y1, x2, y2 = car_bbox.tolist()
+            for person_idx in torch.where(person_indices)[0]:
+                person_bbox = pred['boxes'][person_idx]
+                px1, py1, px2, py2 = person_bbox.tolist()
+                # Check if person is inside or heavily overlaps with car bbox
+                overlap_x = max(0, min(x2, px2) - max(x1, px1))
+                overlap_y = max(0, min(y2, py2) - max(y1, py1))
+                overlap_area = overlap_x * overlap_y
+                person_area = (px2 - px1) * (py2 - py1)
+                if overlap_area > 0.5 * person_area:  # If >50% of person overlaps with car, likely interior
+                    return False
+        
+        return True
     except:
         return False
 
@@ -55,72 +84,107 @@ def parse_filename(fname):
     if year_idx is None:
         return None
     make = parts[0]
-    model = "_".join(parts[1:year_idx])
+    model_name = "_".join(parts[1:year_idx])
     year = parts[year_idx]
-    return make, model, year
+    return make, model_name, year
+
+# Load or create cache
+def load_cache():
+    if os.path.exists(CACHE_FILE):
+        print(f"Loading cached inference results from {CACHE_FILE}...")
+        with open(CACHE_FILE, 'rb') as f:
+            return pickle.load(f)
+    return None
+
+def save_cache(data_list):
+    print(f"Saving inference results to cache ({CACHE_FILE})...")
+    with open(CACHE_FILE, 'wb') as f:
+        pickle.dump(data_list, f)
 
 # Main
-IMG_DIR = "/Users/semv/SJSU/CS171/CNN-for-car-MMCR/data/60000ImagesOfCars/"
-
 data = []
-hashes = defaultdict(list)
+cached_data = load_cache()
 
-files = [f for f in os.listdir(IMG_DIR) if f.endswith(".jpg")]
-print(f"Found {len(files)} JPG images in {IMG_DIR}")
-print("Limiting to the first 2000 images for testing. Remove the slice to process the full dataset.\n")
-files = files[:500]
-
-for i, fname in enumerate(files, start=1):
-    if i % 10 == 0 or i == len(files):
-        print(f"Processing image {i}/{len(files)}: {fname}")
-    path = os.path.join(IMG_DIR, fname)
-    parsed = parse_filename(fname)
-    if parsed is None:
-        continue
-    make, model_name, year = parsed
-    model_key = f"{make}_{model_name}_{year}"
-    h = get_image_hash(path)
-    hashes[h].append(path)
-    is_full = is_full_car(path)
-    data.append({
-        "path": path,
-        "model": model_key,
-        "hash": h,
-        "is_full": is_full
-    })
+if cached_data is not None:
+    print(f"Using cached data: {len(cached_data)} images\n")
+    data = cached_data
+else:
+    print("Running inference on images...")
+    
+    files = [f for f in os.listdir(IMG_DIR) if f.endswith(".jpg")]
+    print(f"Found {len(files)} JPG images in {IMG_DIR}")
+    
+    if SAMPLE_MODE:
+        files = files[:1000]
+        print(f"SAMPLE MODE: Processing first 1000 images for testing\n")
+    else:
+        print("Processing all images...\n")
+    
+    for i, fname in enumerate(files, start=1):
+        if i % 100 == 0 or i == len(files):
+            print(f"Processing image {i}/{len(files)}")
+        
+        path = os.path.join(IMG_DIR, fname)
+        parsed = parse_filename(fname)
+        if parsed is None:
+            continue
+        
+        make, model_name, year = parsed
+        model_key = f"{make}_{model_name}_{year}"
+        h = get_image_hash(path)
+        is_full = is_full_car(path)
+        
+        data.append({
+            "path": path,
+            "model_key": model_key,
+            "hash": h,
+            "is_full": is_full
+        })
+    
+    # Save cache for future runs
+    save_cache(data)
+    print()
 
 df = pd.DataFrame(data)
+print(f"Total images processed: {len(df)}")
+print(f"Good images (full car, no interior): {df['is_full'].sum()}")
+print(f"Percentage good: {100 * df['is_full'].sum() / len(df):.1f}%")
+print(f"Unique car models: {df['model_key'].nunique()}\n")
 
-# Now, for each model, collect good images
+# For each car model, keep 1-2 unique images (by hash), preferring full cars
 to_keep = []
-for model_key, group in df.groupby('model'):
-    # Get unique hashes, prefer full cars
-    good_images = group[group['is_full'] == True]
-    if len(good_images) >= 2:
-        # Take 2 with different hashes if possible
-        unique_hashes = good_images.drop_duplicates('hash')
-        if len(unique_hashes) >= 2:
-            to_keep.extend(unique_hashes.head(2)['path'].tolist())
-        else:
-            to_keep.extend(good_images.head(2)['path'].tolist())
-    elif len(good_images) == 1:
-        to_keep.append(good_images.iloc[0]['path'])
-        print(f"Only 1 full car for {model_key}, keeping it.")
-        # Find another not full but different hash
-        others = group[group['is_full'] == False]
-        unique_others = others.drop_duplicates('hash')
-        if not unique_others.empty:
-            to_keep.append(unique_others.iloc[0]['path'])
+for model_key, group in df.groupby('model_key'):
+    # First, try to get full cars
+    good_images = group[group['is_full'] == True].copy()
+    
+    if len(good_images) > 0:
+        # Remove duplicates by hash, keep 1-2
+        unique_good = good_images.drop_duplicates('hash')
+        to_keep.extend(unique_good.head(IMAGES_PER_CAR_MODEL)['path'].tolist())
     else:
-        # No full, take 2 different hashes
-        unique_group = group.drop_duplicates('hash')
-        to_keep.extend(unique_group.head(2)['path'].tolist())
+        # Fallback: if no full cars, get any images for this model
+        unique_all = group.drop_duplicates('hash')
+        to_keep.extend(unique_all.head(IMAGES_PER_CAR_MODEL)['path'].tolist())
 
-# Now, delete the rest
+to_keep = set(to_keep)
+print(f"Total images to keep: {len(to_keep)}")
+print(f"  ({IMAGES_PER_CAR_MODEL} per car model × {df['model_key'].nunique()} unique models)")
+
+# Delete images not in keep list
 all_paths = set(df['path'])
-to_delete = all_paths - set(to_keep)
-for path in to_delete:
-    os.remove(path)
-    print(f"Deleted {path}")
+to_delete = all_paths - to_keep
+print(f"Deleting {len(to_delete)} images...")
+for i, path in enumerate(to_delete, start=1):
+    if i % 500 == 0:
+        print(f"  Deleted {i}/{len(to_delete)} images...")
+    try:
+        os.remove(path)
+    except Exception as e:
+        print(f"Failed to delete {path}: {e}")
 
-print(f"Kept {len(to_keep)} images, deleted {len(to_delete)}")
+print(f"\n✓ Final dataset: {len(to_keep)} images")
+print(f"  • {IMAGES_PER_CAR_MODEL} image(s) per car model")
+print(f"  • No duplicates (same image hash)")
+print(f"  • Full cars only (no interior shots)")
+if SAMPLE_MODE:
+    print("\n⚠ SAMPLE MODE was ON. To process all 60000 images, set SAMPLE_MODE = False and run again.")
