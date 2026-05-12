@@ -12,4 +12,6 @@ Location: Kaggle
 
 Dataset Name: "60,000+ Images of Cars"
 
+Credit to: Paul
+
 Website: https://www.kaggle.com/datasets/prondeau/the-car-connection-picture-dataset/data
