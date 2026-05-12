@@ -9,5 +9,7 @@ We developed and trained a custom CNN and a pretrained CNN in order to identify 
 
 
 Location: Kaggle
+
 Dataset Name: "60,000+ Images of Cars"
+
 Website: https://www.kaggle.com/datasets/prondeau/the-car-connection-picture-dataset/data
